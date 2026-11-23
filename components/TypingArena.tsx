@@ -12,11 +12,12 @@ type Props = {
   timeLimitMs?: number;                   // Timed mode: fail round when it runs out
   onTimeout?: () => void;
   onRestart?: () => void;                 // Esc / Tab+Enter: skip to next sentence
+  paused?: boolean;                       // true while a modal (command palette) is open
 };
 
 const normalize = (s: string) => s.toLowerCase().trim();
 
-export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs, onTimeout, onRestart }: Props) {
+export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs, onTimeout, onRestart, paused = false }: Props) {
   const { typed, errors, charOk, push, backspace, reset, setCapsLock, capsLock } = useTypingStore();
   const [layoutWarn, setLayoutWarn] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
@@ -64,7 +65,7 @@ export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs
 
   const handleKey = useCallback(
     (e: KeyboardEvent) => {
-      if (doneRef.current) return;
+      if (doneRef.current || paused) return; // modal open (command palette / dashboard) — swallow all keys
       if (e.metaKey || e.ctrlKey || e.altKey) {
         // Ctrl+Backspace: delete last word
         if (e.key === "Backspace" && (e.ctrlKey || e.metaKey)) {
@@ -115,7 +116,7 @@ export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs
       else errorSound();
       push(e.key, correct, performance.now(), isMotorTypo(expected, e.key));
     },
-    [typed, target, push, backspace, setCapsLock, onRestart]
+    [typed, target, push, backspace, setCapsLock, onRestart, paused]
   );
 
   // Timed mode countdown

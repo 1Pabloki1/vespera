@@ -10,6 +10,7 @@ import { applyResult, getBaselineWpm, getNextSentence, getTierBaselineWpm, reinf
 import { hesitations, netWpm } from "@/lib/metrics";
 import { touchStreak } from "@/lib/streak";
 import { isMuted, setMuted } from "@/lib/soundEngine";
+import { localEvaluate } from "@/lib/localJudge";
 import { Volume2, VolumeX } from "lucide-react";
 import MobileNotice from "@/components/MobileNotice";
 import type { Sentence, Tier } from "@/data/sentences";
@@ -69,10 +70,17 @@ export default function Home() {
     setMutedState(m);
   }, []);
 
-  // Fire-and-forget LLM judge; verdict badges in when it lands.
+  // Fire-and-forget LLM judge. On 429 / 5xx / network error / bad JSON the
+  // client falls back to the SAME local LCS judge the server uses (README contract).
   const evaluateAsync = useCallback((s: Sentence, typed: string) => {
     const st = useTypingStore.getState();
     pendingEval.current += 1;
+    const useLocal = (reason: string) => {
+      const v = localEvaluate({ userEn: typed, accepted: s.accepted });
+      setVerdicts((prev) => new Map(prev).set(s.id, v));
+      setToast(`${v.isValid ? "✅" : "⚠️"} локальная оценка (${reason}): ${v.isValid ? "верно" : "есть неточности"}`);
+      window.setTimeout(() => setToast(null), 4000);
+    };
     fetch("/api/evaluate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -83,10 +91,23 @@ export default function Home() {
         motorErrorsCount: st.errors - st.nonMotorErrors,
       }),
     })
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (r.status === 429) {
+          useLocal("лимит запросов");
+          return null;
+        }
+        if (!r.ok) {
+          useLocal(`сервер ${r.status}`);
+          return null;
+        }
+        return r.json().catch(() => {
+          useLocal("некорректный ответ");
+          return null;
+        });
+      })
       .then((v: Verdict | null) => {
         pendingEval.current -= 1;
-        if (!v) return;
+        if (!v) return; // local fallback already applied above
         setVerdicts((prev) => new Map(prev).set(s.id, v));
         if (v.detectedWeakTags.length > 0) reinforceTags(v.detectedWeakTags);
         setToast(v.isValid ? `✅ «${s.ru.slice(0, 30)}…» — верно` : `⚠️ «${s.ru.slice(0, 30)}…» — есть неточности`);
@@ -94,6 +115,7 @@ export default function Home() {
       })
       .catch(() => {
         pendingEval.current -= 1;
+        useLocal("нет сети");
       });
   }, []);
 
@@ -105,6 +127,7 @@ export default function Home() {
       setRounds((rs) => [...rs, round]);
       updateTierBaselineWpm(s.tier, netWpm(round.charsTyped, ms / 60000, round.uncorrectedErrors));
       evaluateAsync(s, typed);
+      touchStreak(); // streak advances when a round is fixed, not when dashboard opens (idempotent per day)
       setResult({ typed, ms });
     },
     [evaluateAsync]
@@ -121,6 +144,7 @@ export default function Home() {
       const round = { ...snapshotRound(s, st.typed, ms), nonMotorErrors: st.nonMotorErrors, timeout: true };
       setRounds((rs) => [...rs, round]);
       evaluateAsync(s, st.typed);
+      touchStreak(); // a timed-out round is still a completed training session
       setResult({ typed: st.typed, ms, timeout: true });
     },
     [evaluateAsync]
@@ -133,13 +157,13 @@ export default function Home() {
 
   // Flow mode: Enter proceeds immediately (evaluation runs in background)
   useEffect(() => {
-    if (!result || showDashboard) return;
+    if (!result || showDashboard || paletteOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Enter") next();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [result, showDashboard, next]);
+  }, [result, showDashboard, paletteOpen, next]);
 
   // Ctrl/Cmd+K: command palette
   useEffect(() => {
@@ -178,8 +202,8 @@ export default function Home() {
           rounds={rounds}
           verdicts={verdicts}
           baselineWpm={getBaselineWpm()}
-          onPracticeWeakSpots={() => { touchStreak(); setShowDashboard(false); setResult(null); setSeed((x) => x + 1); }}
-          onClose={() => { touchStreak(); setRounds([]); setVerdicts(new Map()); setShowDashboard(false); setResult(null); setSeed((x) => x + 1); }}
+          onPracticeWeakSpots={() => { setShowDashboard(false); setResult(null); setSeed((x) => x + 1); }}
+          onClose={() => { setRounds([]); setVerdicts(new Map()); setShowDashboard(false); setResult(null); setSeed((x) => x + 1); }}
         />
       </main>
     );
@@ -293,6 +317,7 @@ export default function Home() {
             timeLimitMs={timeLimitMs}
             onTimeout={fail(sentence)}
             onRestart={next}
+            paused={paletteOpen}
           />
         </>
       )}

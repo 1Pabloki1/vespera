@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalize, fallbackEvaluate, type Verdict } from "@/lib/localJudge";
 
 export const runtime = "nodejs";
 
@@ -31,72 +32,6 @@ type EvaluateRequest = {
   hesitationWords?: string[];
   motorErrorsCount?: number;
 };
-
-type Verdict = {
-  isValid: boolean;
-  score: number; // 0-100
-  grammarFeedback: string; // concise Russian feedback (cognitive gaps, not typos)
-  betterNativeAlternative: string;
-  detectedWeakTags: string[];
-  source: "exact" | "llm" | "fallback";
-};
-
-const normalize = (s: string) =>
-  s.toLowerCase().replace(/[.,!?;:'"«»„“”]/g, "").replace(/\s+/g, " ").trim();
-
-// ── deterministic fallback: word-level similarity vs reference ──────────
-function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length;
-  if (!m) return n;
-  if (!n) return m;
-  let prev = Array.from({ length: n + 1 }, (_, i) => i);
-  for (let i = 1; i <= m; i++) {
-    const cur = [i];
-    for (let j = 1; j <= n; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    }
-    prev = cur;
-  }
-  return prev[n];
-}
-
-/** Word-level similarity via LCS length vs reference words. */
-function wordSimilarity(user: string, ref: string): number {
-  const uw = normalize(user).split(" ");
-  const rw = normalize(ref).split(" ");
-  if (!rw.length) return 0;
-  // LCS with tolerance: words within Levenshtein 1 count as equal
-  const eq = (a: string, b: string) => a === b || levenshtein(a, b) <= 1;
-  const prev = new Array<number>(rw.length + 1).fill(0);
-  for (let i = 1; i <= uw.length; i++) {
-    let diag = prev[0];
-    for (let j = 1; j <= rw.length; j++) {
-      const tmp = prev[j];
-      prev[j] = eq(uw[i - 1], rw[j - 1]) ? diag + 1 : Math.max(prev[j], prev[j - 1]);
-      diag = tmp;
-    }
-  }
-  return prev[rw.length] / rw.length;
-}
-
-function fallbackEvaluate(req: EvaluateRequest): Verdict {
-  const ref = req.accepted[0];
-  const sim = wordSimilarity(req.userEn, ref);
-  const score = Math.round(sim * 100);
-  const isValid = sim >= 0.85;
-  return {
-    isValid,
-    score,
-    grammarFeedback: isValid
-      ? "Перевод близок к эталонному — есть мелкие неточности, проверьте формулировку ниже."
-      : sim >= 0.5
-      ? "Перевод частично совпадает с эталонным. Сравните свой вариант с эталоном ниже и обратите внимание на порядок слов и времена."
-      : "Перевод сильно отличается от эталонного. Сверьтесь с эталоном ниже.",
-    betterNativeAlternative: ref,
-    detectedWeakTags: [],
-    source: "fallback",
-  };
-}
 
 // ── LLM judge (OpenAI-compatible JSON mode; Gemini works via OpenAI-compat endpoint) ──
 async function llmEvaluate(req: EvaluateRequest): Promise<Verdict> {
