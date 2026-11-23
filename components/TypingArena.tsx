@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useTypingStore } from "@/store/typingStore";
 import { isCyrillicChar, isMotorTypo } from "@/lib/typoDetector";
+import { pickTarget } from "@/lib/typingTarget";
 import { click as clickSound, error as errorSound, complete as completeSound } from "@/lib/soundEngine";
 
 type Props = {
@@ -27,7 +28,7 @@ export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs
   const caretRef = useRef<HTMLDivElement>(null);
 
   const normTargets = targets.map(normalize);
-  const target = normTargets.find((t) => typed === t.slice(0, typed.length)) ?? normTargets[0];
+  const target = pickTarget(typed, normTargets); // case-insensitive variant selection
   const isComplete = normTargets.includes(normalize(typed));
 
   // Caret: translate3d on the current char span — no layout thrash, no re-render cost.

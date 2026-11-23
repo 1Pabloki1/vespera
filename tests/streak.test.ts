@@ -36,16 +36,23 @@ describe("streak: idempotency & local dates", () => {
     expect(s.count).toBe(2);
   });
 
-  it("gap day consumes the freeze instead of resetting", () => {
+  it("one missed day consumes the freeze instead of resetting", () => {
     touchStreak(new Date(2026, 10, 20, 12, 0)); // count 1, freeze available
-    const s = touchStreak(new Date(2026, 10, 22, 12, 0)); // skipped Nov 21
+    const s = touchStreak(new Date(2026, 10, 22, 12, 0)); // skipped Nov 21 only
     expect(s.count).toBe(1); // frozen, not reset
     expect(s.freezeAvailable).toBe(false); // freeze consumed
   });
 
-  it("two gap days reset to 1", () => {
+  it("TWO missed days reset even with a freeze available (unlimited-freeze bug)", () => {
     touchStreak(new Date(2026, 10, 20, 12, 0));
-    const s = touchStreak(new Date(2026, 10, 23, 12, 0)); // 2 days missed
+    const s = touchStreak(new Date(2026, 10, 23, 12, 0)); // skipped Nov 21 AND 22
+    expect(s.count).toBe(1);
+    expect(s.freezeAvailable).toBe(true); // fresh start gets the freeze back
+  });
+
+  it("freeze does not resurrect a long-dead streak", () => {
+    touchStreak(new Date(2026, 10, 1, 12, 0));
+    const s = touchStreak(new Date(2026, 10, 10, 12, 0)); // 8 missed days
     expect(s.count).toBe(1);
   });
 });

@@ -28,17 +28,25 @@ function save(s: Streak) {
 }
 
 /** Call when a training round is fixed. Idempotent per local day.
- *  `now` is injectable for tests. */
+ *  `now` is injectable for tests.
+ *
+ *  Gap rule: the freeze covers EXACTLY ONE missed calendar day.
+ *  Two or more missed days always reset — no unlimited freeze.
+ *  Day math is calendar-based (local dates), not `now - 24h`,
+ *  so DST transitions (23h/25h days) can't corrupt the streak. */
 export function touchStreak(now: Date = new Date()): Streak {
   const s = load();
   const today = dayKey(now);
   if (s.lastDate === today) return s; // idempotent: multiple workouts same day don't stack
 
-  const yesterday = new Date(now.getTime() - DAY_MS);
-  if (s.lastDate === dayKey(yesterday)) {
+  const last = s.lastDate ? new Date(`${s.lastDate}T00:00:00`) : null;
+  // calendar-day difference, immune to DST: count midnights between the two local dates
+  const missedDays = last ? Math.round((Date.parse(today) - Date.parse(s.lastDate)) / DAY_MS) : Infinity;
+
+  if (missedDays === 1) {
     s.count += 1;
-  } else if (s.freezeAvailable && s.count > 0) {
-    s.freezeAvailable = false; // freeze consumed: gap day doesn't reset the streak
+  } else if (missedDays === 2 && s.freezeAvailable && s.count > 0) {
+    s.freezeAvailable = false; // freeze consumed: exactly one missed day doesn't reset
   } else {
     s.count = 1;
     s.freezeAvailable = true;
