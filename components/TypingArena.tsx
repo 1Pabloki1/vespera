@@ -14,12 +14,10 @@ type Props = {
   onRestart?: () => void;                 // Esc / Tab+Enter: skip to next sentence
 };
 
-type CharState = "idle" | "correct" | "wrong";
-
 const normalize = (s: string) => s.toLowerCase().trim();
 
 export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs, onTimeout, onRestart }: Props) {
-  const { typed, errors, push, backspace, reset, setCapsLock, capsLock } = useTypingStore();
+  const { typed, errors, charOk, push, backspace, reset, setCapsLock, capsLock } = useTypingStore();
   const [layoutWarn, setLayoutWarn] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const doneRef = useRef(false);
@@ -73,7 +71,7 @@ export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs
           e.preventDefault();
           const st = useTypingStore.getState();
           const trimmed = st.typed.replace(/\s*\S+\s*$/, "");
-          useTypingStore.setState({ typed: trimmed, timestamps: st.timestamps.slice(0, trimmed.length), lastKeyWasError: false });
+          st.backspace(st.typed.length - trimmed.length);
         }
         return;
       }
@@ -110,7 +108,9 @@ export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs
       }
 
       const expected = target[typed.length] ?? "";
-      const correct = e.key === expected;
+      // Single case rule everywhere: case-insensitive (Shift/CapsLock never false-mismatch).
+      // Live check, completion check and final grading all compare lowercased.
+      const correct = e.key.toLowerCase() === expected;
       if (correct) clickSound();
       else errorSound();
       push(e.key, correct, performance.now(), isMotorTypo(expected, e.key));
@@ -145,11 +145,6 @@ export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs
     return () => window.removeEventListener("keydown", handleKey);
   }, [handleKey]);
 
-  const states: CharState[] = target.split("").map((ch, i) => {
-    if (i < typed.length) return typed[i] === ch ? "correct" : "wrong";
-    return "idle";
-  });
-
   return (
     <div className="font-mono select-none outline-none" tabIndex={0}>
       <div className="mb-4 flex items-center justify-between font-sans text-sm">
@@ -162,28 +157,22 @@ export default function TypingArena({ promptRu, targets, onComplete, timeLimitMs
         )}
       </div>
 
+      {/* Active Recall: only the Russian prompt is visible — the English target stays hidden */}
       <p className="mb-8 font-sans text-xl text-zinc-400">{promptRu}</p>
 
-      <div ref={containerRef} className="relative text-2xl leading-relaxed tracking-wide">
+      {/* Live input only: typed chars (with error tint), zero upcoming-target leakage */}
+      <div ref={containerRef} className="relative min-h-[2.5rem] text-2xl leading-relaxed tracking-wide">
         <div
           ref={caretRef}
           className="absolute left-0 top-0 w-[2px] rounded bg-[#e2b714] transition-transform duration-75 ease-out will-change-transform"
         />
-        {target.split("").map((ch, i) => (
-          <span
-            key={i}
-            data-idx={i}
-            className={
-              states[i] === "correct"
-                ? "text-zinc-100"
-                : states[i] === "wrong"
-                ? "text-red-400 underline decoration-red-500/60"
-                : "text-zinc-600"
-            }
-          >
+        {typed.split("").map((ch, i) => (
+          <span key={i} data-idx={i} className={charOk[i] ? "text-zinc-100" : "text-red-400 underline decoration-red-500/60"}>
             {ch}
           </span>
         ))}
+        {/* caret sentinel at the current position */}
+        <span data-idx={typed.length} className="inline-block w-0" />
       </div>
 
       <div className="mt-8 flex gap-6 font-sans text-sm text-zinc-500">

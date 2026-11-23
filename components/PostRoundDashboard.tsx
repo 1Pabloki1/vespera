@@ -14,6 +14,7 @@ export type Round = {
   motorErrors: number;    // adjacent-key slips (fat fingers)
   nonMotorErrors: number; // grammar/spelling gaps
   hesitations: number;    // pauses > 1200ms
+  timeout?: boolean;      // round ended by timer, not by completing the sentence
 };
 
 import type { Sentence } from "@/data/sentences";
@@ -120,11 +121,12 @@ export default function PostRoundDashboard({ rounds, verdicts, baselineWpm, onPr
             return (
               <details key={i} className="rounded-lg bg-zinc-900 px-4 py-3">
                 <summary className="cursor-pointer text-sm text-zinc-300">
-                  <span className="mr-2">{v ? (v.isValid ? "✅" : "⚠️") : "⏳"}</span>
+                  <span className="mr-2">{r.timeout ? "⏱" : v ? (v.isValid ? "✅" : "⚠️") : "⏳"}</span>
                   {r.sentence.ru}
                 </summary>
                 <div className="mt-3 space-y-2 font-mono text-sm">
                   <p><span className="text-zinc-500">Вы: </span>{r.typed || "—"}</p>
+                  {r.timeout && <p className="font-sans text-xs text-zinc-500">не завершено за отведённое время — языковая ошибка не засчитана</p>}
                   {v && !v.isValid && (
                     <>
                       <p><span className="text-zinc-500">Естественнее: </span><span className="text-emerald-400">{v.betterNativeAlternative}</span></p>

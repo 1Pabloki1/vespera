@@ -113,11 +113,15 @@ export default function Home() {
   const fail = useCallback(
     (s: Sentence) => () => {
       const st = useTypingStore.getState();
-      applyResult({ sentence: s, nonMotorErrors: Math.max(1, st.nonMotorErrors), maxPauseMs: maxPause(st.timestamps), ms: 0 });
-      const round = { ...snapshotRound(s, st.typed, 0), nonMotorErrors: Math.max(1, st.nonMotorErrors) };
+      // Real elapsed time — never record ms: 0 for a round that actually ran.
+      const ms = st.startTime ? performance.now() - st.startTime : 0;
+      // Timeout is "incomplete", not a linguistic error: keep the user's actual
+      // nonMotorErrors instead of forcing a fake grammar penalty.
+      applyResult({ sentence: s, nonMotorErrors: st.nonMotorErrors, maxPauseMs: maxPause(st.timestamps), ms });
+      const round = { ...snapshotRound(s, st.typed, ms), nonMotorErrors: st.nonMotorErrors, timeout: true };
       setRounds((rs) => [...rs, round]);
       evaluateAsync(s, st.typed);
-      setResult({ typed: st.typed, ms: 0, timeout: true });
+      setResult({ typed: st.typed, ms, timeout: true });
     },
     [evaluateAsync]
   );
@@ -255,6 +259,10 @@ export default function Home() {
             )}
           </p>
           <p className="mb-4 font-mono text-xl">{result.typed || "—"}</p>
+          {/* Reference revealed only after the round — Active Recall stays honest */}
+          <p className="mb-4 font-mono text-lg text-zinc-500">
+            Эталон: <span className="text-zinc-300">{sentence.en}</span>
+          </p>
           <div className="mb-3 flex flex-wrap justify-center gap-2">
             {sentence.tags.map((t) => (
               <span key={t} className="rounded-full border border-zinc-700 px-3 py-1 font-sans text-xs text-zinc-500">
